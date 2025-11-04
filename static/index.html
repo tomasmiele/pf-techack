@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Phishing Detector — MVP</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121a2b; --muted:#8aa0b6; --ok:#16a34a; --warn:#f59e0b; --bad:#e11d48; }
+    body{margin:0;font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu; background:var(--bg); color:white}
+    .wrap{max-width:980px;margin:48px auto;padding:0 16px}
+    .card{background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.2)}
+    .row{display:flex; gap:12px}
+    input[type=url]{flex:1;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0d1424;color:white}
+    button{padding:12px 14px;border-radius:10px;border:0;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}
+    table{width:100%;border-collapse:separate;border-spacing:0 8px;margin-top:14px}
+    th,td{padding:10px 12px; text-align:left}
+    th{color:var(--muted); font-weight:600}
+    tr{background:#0e1729}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px;vertical-align:middle}
+    .muted{color:var(--muted)}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-size:12px;background:#0b1322;border:1px solid rgba(255,255,255,.08)}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace}
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🔎 Phishing Detector — MVP</h1>
+    <p class="muted">Cole uma URL e veja indicadores básicos + listas (OpenPhish / URLhaus).</p>
+
+    <div class="card">
+      <div class="row">
+        <input id="url" type="url" placeholder="https://exemplo.com/login"/>
+        <button id="btn" onclick="runCheck()">Analisar</button>
+      </div>
+      <div id="hint" class="muted" style="margin-top:8px">OpenPhish e URLhaus são consultados sem chave nesta versão.</div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>URL</th>
+            <th>Heurísticas</th>
+            <th>Listas</th>
+          </tr>
+        </thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+async function runCheck(){
+  const url = document.getElementById('url').value.trim();
+  if(!url){ alert('Informe uma URL.'); return; }
+  document.getElementById('btn').disabled = true;
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url})
+    });
+    if(!res.ok){ alert('Falha na análise.'); return; }
+    const data = await res.json();
+    addRow(data);
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  } finally {
+    document.getElementById('btn').disabled = false;
+  }
+}
+
+function esc(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])) }
+
+function addRow(d){
+  const verdict = d.verdict || {label:'safe', color:'#16a34a'};
+  const heur = (d.heuristics||[]).map(h=>`<span class="pill">${esc(h.key)}</span>`).join(' ');
+  const bl = (d.blacklists||[]).map(b=>`<div class="pill">${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>${b.note? ' — '+esc(b.note): ''}${b.error? ' — error' : ''}</div>`).join(' ');
+  const row = document.createElement('tr');
+  row.innerHTML = `
+    <td><span class="dot" style="background:${verdict.color}"></span>${esc(verdict.label)}</td>
+    <td class="mono">${esc(d.normalized||d.input)}</td>
+    <td>${heur||'<span class="muted">—</span>'}</td>
+    <td>${bl||'<span class="muted">—</span>'}</td>
+  `;
+  document.getElementById('results').prepend(row);
+}
+</script>
+</body>
+</html>
