@@ -1,6 +1,6 @@
-# app.py — Phishing Detector (MVP) (backend separado)
+# app.py — Phishing Detector (MVP)
 # Run: python -m uvicorn app:app --reload
-# Requisitos: pip install -r requirements.txt
+# Requires: pip install -r requirements.txt
 
 import os
 import re
@@ -15,7 +15,7 @@ import tldextract
 
 app = FastAPI(title="Phishing Detector — MVP")
 
-# mount static folder (frontend)
+# Mount da pasta estática (frontend)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -45,41 +45,34 @@ def domain_parts(url: str):
 
 def heuristic_checks(url: str):
     parsed, domain, sub = domain_parts(url)
-
     findings = []
 
-    # 1) IP address used instead of domain
     host = parsed.hostname or ""
+
+    # 1) IP em vez de domínio
     if IP_PATTERN.match(host):
         findings.append(("ip_in_url", f"Host é um IP ({host})."))
 
-    # 2) Punycode (IDN) indicators
+    # 2) Punycode (IDN)
     if host.startswith("xn--") or ".xn--" in host:
         findings.append(("punycode_idn", "Uso de Punycode (IDN) no domínio."))
 
-    # 3) Excessive subdomains
+    # 3) Subdomínios em excesso
     if sub:
         sub_count = len(sub.split("."))
         if sub_count >= 3:
-            findings.append(
-                ("excessive_subdomains", f"Subdomínios excessivos ({sub_count}).")
-            )
+            findings.append(("excessive_subdomains", f"Subdomínios excessivos ({sub_count})."))
 
-    # 4) Leet / números em substituição a letras no domínio
+    # 4) Leet / substituição por números
     bare = domain.split(".")[0] if domain else ""
     if LEET_PATTERN.search(bare):
-        findings.append(
-            (
-                "leet_in_domain",
-                f"Possível substituição por números/caracteres no domínio ('{bare}').",
-            )
-        )
+        findings.append(("leet_in_domain", f"Possível substituição por números/caracteres no domínio ('{bare}')."))
 
-    # 5) Suspicious characters in full URL
+    # 5) Caracteres especiais suspeitos
     if any(ch in SUSPICIOUS_CHARS for ch in url):
         findings.append(("suspicious_chars", "Caracteres especiais suspeitos na URL."))
 
-    # 6) Very long URL
+    # 6) URL muito longa
     if len(url) > 120:
         findings.append(("long_url", f"URL muito longa ({len(url)} chars)."))
 
@@ -142,45 +135,70 @@ async def blacklist_checks(url: str):
 
 
 # -----------------------------
-# Veredito
+# Veredito e alerts
 # -----------------------------
 
-
 def verdict(heuristics: list, blacklists: list) -> dict:
-    flagged = any(b.get("listed") for b in blacklists)
-    score = 0
+    """Compute verdict using weighted heuristics.
+    leet_in_domain => peso alto (3).
+    Heurísticas de peso 2 geram 'alerts' (possibilidade, não conclusivo).
+    """
+    # Se qualquer blacklist listou => malicious
+    if any(b.get("listed") for b in blacklists):
+        return {"label": "malicious", "score": None, "color": "#e11d48"}
+
+    weight = {
+        "ip_in_url": 3,
+        "punycode_idn": 2,          # médio: gera alert
+        "excessive_subdomains": 2,  # médio: gera alert
+        "leet_in_domain": 3,        # ALTO agora
+        "suspicious_chars": 1,
+        "long_url": 1,
+    }
+
+    score = sum(weight.get(k, 1) for k, _ in heuristics)
+
+    if score >= 3:
+        return {"label": "suspicious", "score": score, "color": "#f59e0b"}
+    else:
+        return {"label": "safe", "score": score, "color": "#16a34a"}
+
+
+def generate_alerts(heuristics: list) -> list:
+    """Gera alerts para heurísticas de peso 2 (possibilidade de phishing, não conclusivo)."""
     weight = {
         "ip_in_url": 3,
         "punycode_idn": 2,
         "excessive_subdomains": 2,
-        "leet_in_domain": 2,
+        "leet_in_domain": 3,
         "suspicious_chars": 1,
         "long_url": 1,
     }
-    for k, _ in heuristics:
-        score += weight.get(k, 1)
-
-    if flagged:
-        label = "malicious"
-        color = "#e11d48"
-    elif score >= 3:
-        label = "suspicious"
-        color = "#f59e0b"
-    else:
-        label = "safe"
-        color = "#16a34a"
-
-    return {"label": label, "score": score, "color": color}
+    explanations = {
+        "punycode_idn": (
+            "Uso de Punycode (IDN): possibilidade de homograph attack",
+            "Nem todo domínio em Punycode é malicioso — pode ser legítimo (caracteres não-ASCII). Verifique o domínio renderizado e o certificado SSL."
+        ),
+        "excessive_subdomains": (
+            "Subdomínios em excesso: pode esconder o domínio real",
+            "Alguns serviços legítimos usam subdomínios longos (CDNs, multi-tenant). Combine com outros sinais antes de concluir."
+        ),
+    }
+    keys = {k for k, _ in heuristics}
+    alerts = []
+    for key in keys:
+        if weight.get(key) == 2 and key in explanations:
+            title, why = explanations[key]
+            alerts.append({"key": key, "title": title, "why_not_certain": why})
+    return alerts
 
 
 # -----------------------------
 # Endpoints
 # -----------------------------
 
-
 @app.get("/")
 async def serve_frontend():
-    # serve the static index.html
     return FileResponse("static/index.html")
 
 
@@ -194,6 +212,7 @@ async def analyze(payload: dict):
     heur = heuristic_checks(norm)
     bl = await blacklist_checks(norm)
     v = verdict(heur, bl)
+    alerts = generate_alerts(heur)
 
     result = {
         "input": url,
@@ -201,8 +220,6 @@ async def analyze(payload: dict):
         "heuristics": [{"key": k, "detail": d} for k, d in heur],
         "blacklists": bl,
         "verdict": v,
+        "alerts": alerts,
     }
     return JSONResponse(result)
-
-
-# run with: python -m uvicorn app:app --reload

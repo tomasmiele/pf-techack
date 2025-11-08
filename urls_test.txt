@@ -1,0 +1,24 @@
+https://www.google.com
+
+esperado: safe, nenhuma heurística.
+
+
+http://127.0.0.1:8080/test
+
+esperado: ip_in_url (localhost/IP) — bom para checar detecção de IP.
+
+http://a.b.c.d.e.victim.example.com/login
+
+esperado: excessive_subdomains (vários subdomínios).
+
+http://paypa1.example
+
+esperado: leet_in_domain (substituição por número).
+
+http://xn--pple-43d.example
+
+esperado: punycode_idn (IDN / punycode) — string sintética para testar a regra.
+
+http://login%40example.com/login?next=1
+
+esperado: suspicious_chars (caractere %40 / @ codificado).

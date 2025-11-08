@@ -33,7 +33,9 @@
         <input id="url" type="url" placeholder="https://exemplo.com/login"/>
         <button id="btn" onclick="runCheck()">Analisar</button>
       </div>
-      <div id="hint" class="muted" style="margin-top:8px">OpenPhish e URLhaus são consultados sem chave nesta versão.</div>
+      <div id="hint" class="muted" style="margin-top:8px">
+        OpenPhish e URLhaus são consultados sem chave nesta versão.
+      </div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -76,12 +78,17 @@ function esc(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({"&":"&amp;",
 function addRow(d){
   const verdict = d.verdict || {label:'safe', color:'#16a34a'};
   const heur = (d.heuristics||[]).map(h=>`<span class="pill">${esc(h.key)}</span>`).join(' ');
-  const bl = (d.blacklists||[]).map(b=>`<div class="pill">${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>${b.note? ' — '+esc(b.note): ''}${b.error? ' — error' : ''}</div>`).join(' ');
+  const alerts = (d.alerts||[]).map(a =>
+    `<div class="muted" style="margin-top:6px"><strong>Possível phishing:</strong> ${esc(a.title)} — <em>${esc(a.why_not_certain)}</em></div>`
+  ).join('');
+  const bl = (d.blacklists||[]).map(b=>
+    `<div class="pill">${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>${b.note? ' — '+esc(b.note): ''}${b.error? ' — error' : ''}</div>`
+  ).join(' ');
   const row = document.createElement('tr');
   row.innerHTML = `
     <td><span class="dot" style="background:${verdict.color}"></span>${esc(verdict.label)}</td>
     <td class="mono">${esc(d.normalized||d.input)}</td>
-    <td>${heur||'<span class="muted">—</span>'}</td>
+    <td>${heur||'<span class="muted">—</span>'}${alerts? '<br/>'+alerts : ''}</td>
     <td>${bl||'<span class="muted">—</span>'}</td>
   `;
   document.getElementById('results').prepend(row);
