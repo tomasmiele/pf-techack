@@ -1,26 +1,79 @@
-https://www.google.com
+SAFE (limpo)
 
-esperado: safe, nenhuma heurística.
+https://www.python.org
 
+SUSPICIOUS (heurístico)
 
-http://127.0.0.1:8080/test
+http://paypa1.com
 
-esperado: ip_in_url (localhost/IP) — bom para checar detecção de IP.
+MALICIOUS (blacklist)
 
-http://a.b.c.d.e.victim.example.com/login
+XX
 
-esperado: excessive_subdomains (vários subdomínios).
+OpenPhish: listed
 
-http://paypa1.example
+XX
 
-esperado: leet_in_domain (substituição por número).
+URLhaus: listed
 
-http://xn--pple-43d.example
+XX
 
-esperado: punycode_idn (IDN / punycode) — string sintética para testar a regra.
+URLhaus: invalid
 
-http://login%40example.com/login?next=1
+ftp://example.com
 
-esperado: suspicious_chars (caractere %40 / @ codificado).
+URLhaus: erro
 
-http://curl -s -X POST http://127.0.0.1:8000/analyze \ -H "Content-Type: application/json" \ -d '{"url":"http://fjb5.oss-me.com/japan/post.php"}' | jq
+Punycode (IDN)
+
+http://xn--pple-43d.com
+
+Excesso de subdomínios
+
+http://a.b.c.d.e.example.com
+
+Leet (peso alto)
+
+http://paypa1.com
+
+Caracteres especiais
+
+http://example.com/%2F@evil.com
+
+URL muito longa
+
+X
+
+IP no host
+
+http://93.184.216.34
+
+WHOIS (idade do domínio)
+
+DNS dinâmico
+
+http://test.ddns.net
+
+SSL inválido (vários cenários)
+
+https://wrong.host.badssl.com/
+
+Redirects suspeitos (muitos hops)
+
+http://httpbin.org/redirect/5
+
+Redirect cross-domain
+
+http://httpbin.org/redirect-to?url=https://example.com&status_code=302
+
+Similaridade com marca (lookalike)
+
+https://gooogle.com
+
+Conteúdo: login/senha
+
+https://github.com/login
+
+Conteúdo: palavras sensíveis
+
+https://pt.wikipedia.org/wiki/Cadastro_de_pessoas_f%C3%ADsicas

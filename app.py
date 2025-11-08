@@ -103,13 +103,23 @@ def heuristic_checks(url: str):
 # Blacklists (OpenPhish + URLhaus)
 # -----------------------------
 
+OPENPHISH_FEED = os.getenv("OPENPHISH_FEED", "https://openphish.com/feed.txt")
+OPENPHISH_CACHE = os.getenv("OPENPHISH_CACHE", "openphish_cache.txt")
+
 async def check_openphish(url: str) -> dict:
+    """
+    Checa o feed público do OpenPhish.
+    - Se o feed estiver disponível: faz a verificação normal e retorna {"source":"OpenPhish","listed":bool}
+    - Se o feed NÃO estiver disponível por rede/timeout, tenta usar um cache local (se existir)
+      e retorna {"source":"OpenPhish","listed":False,"note":"feed_unavailable"}. Não retorna 'error'.
+    """
+    u_host = urlparse(url).netloc
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.get(OPENPHISH_FEED)
+            # requisita o feed com header simples para evitar bloqueios
+            r = await client.get(OPENPHISH_FEED, headers={"User-Agent": "phish-detector/1.0"})
             r.raise_for_status()
             feed = r.text.splitlines()
-        u_host = urlparse(url).netloc
         hit = any(
             (url in line)
             or (
@@ -118,9 +128,23 @@ async def check_openphish(url: str) -> dict:
             )
             for line in feed
         )
+        # atualizar cache (silenciosamente; falhas em cache não quebram)
+        try:
+            with open(OPENPHISH_CACHE, "w", encoding="utf-8") as f:
+                f.write("\n".join(feed))
+        except Exception:
+            pass
         return {"source": "OpenPhish", "listed": bool(hit)}
-    except Exception as e:
-        return {"source": "OpenPhish", "listed": False, "error": repr(e)}
+    except Exception:
+        # tentativa de fallback: usar cache local se existir
+        try:
+            with open(OPENPHISH_CACHE, "r", encoding="utf-8") as f:
+                feed = f.read().splitlines()
+            hit = any((url in line) or (urlparse(line).netloc == u_host) for line in feed)
+            return {"source": "OpenPhish", "listed": bool(hit), "note": "cached_used"}
+        except Exception:
+            # quando nem o cache existe, retornamos apenas uma nota - sem 'error'
+            return {"source": "OpenPhish", "listed": False, "note": "feed_unavailable"}
 
 async def check_urlhaus(url: str) -> dict:
     try:
