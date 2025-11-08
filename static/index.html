@@ -5,49 +5,103 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Phishing Detector</title>
   <style>
-    :root { --bg:#0b1020; --card:#121a2b; --muted:#8aa0b6; --ok:#16a34a; --warn:#f59e0b; --bad:#e11d48; }
+    :root { --bg:#0b1020; --card:#121a2b; --muted:#8aa0b6; --ok:#16a34a; --warn:#f59e0b; --bad:#e11d48; --ink:#dbe7ff; }
+    * { box-sizing: border-box }
     body{margin:0;font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu; background:var(--bg); color:white}
-    .wrap{max-width:980px;margin:48px auto;padding:0 16px}
-    .card{background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.2)}
-    .row{display:flex; gap:12px}
-    input[type=url]{flex:1;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0d1424;color:white}
-    button{padding:12px 14px;border-radius:10px;border:0;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}
-    table{width:100%;border-collapse:separate;border-spacing:0 8px;margin-top:14px}
-    th,td{padding:10px 12px; text-align:left}
-    th{color:var(--muted); font-weight:600}
-    tr{background:#0e1729}
+    .wrap{max-width:1200px;margin:32px auto;padding:0 16px; display:grid; grid-template-columns: 1.2fr .8fr; gap:16px}
+    .card{background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px; box-shadow:0 6px 24px rgba(0,0,0,.25)}
+    .row{display:flex; gap:12px; align-items:stretch}
+    input[type=url]{flex:1;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0d1424;color:white;min-height:44px}
+    button{padding:12px 16px;border-radius:10px;border:0;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;min-height:44px}
+    table{width:100%;border-collapse:collapse;margin-top:14px; table-layout:fixed}
+    th,td{padding:12px 14px; text-align:left; vertical-align:top; border-top:1px solid rgba(255,255,255,.06)}
+    thead th{color:var(--muted); font-weight:700; border-top:none}
+    tr:first-child td{border-top:none}
     .dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px;vertical-align:middle}
     .muted{color:var(--muted)}
-    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-size:12px;background:#0b1322;border:1px solid rgba(255,255,255,.08)}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace}
-    .err{color:#fecaca}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-size:12px;background:#0b1322;border:1px solid rgba(255,255,255,.08); margin:4px 6px 0 0}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; color:var(--ink)}
+    .stack{display:flex; flex-wrap:wrap; gap:6px}
+    .urlcell pre{margin:0; white-space:pre-wrap; word-break:break-word}
+    .section{display:flex; flex-direction:column; gap:10px}
+    .box{background:#0b1322;border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:10px 12px}
+    .boxhead{display:flex; align-items:center; gap:8px; font-weight:700}
+    .status-ok{color:var(--ok)}
+    .status-no{color:var(--muted)}
+    .status-bad{color:#fecaca}
+    details{margin-top:6px}
+    summary{cursor:pointer; color:#cbd5e1}
+    .alerts{margin-top:8px}
+    .alertline{color:#cbd5e1; font-size:13px}
+    .kv{margin:2px 0}
+    .kv label{display:inline-block; min-width:120px; color:#9fb2c9}
+    .kv code{color:#e5edff}
+    .dash-title{margin:0 0 8px 0; font-size:18px}
+    .totals{display:flex; gap:8px; flex-wrap:wrap}
+    .badge{background:#0b1322;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:6px 10px}
+    .toolbar{display:flex; gap:8px; margin-top:8px}
+    canvas{width:100%; height:160px; background: #0b1322; border-radius: 12px; border:1px solid rgba(255,255,255,.06)}
+    .legend{display:flex; gap:10px; margin-top:8px}
+    .legend .i{display:inline-flex; align-items:center; gap:6px}
+    .sw{display:inline-block;width:10px;height:10px;border-radius:2px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Phishing Detector</h1>
-    <p class="muted">Cole uma URL e veja indicadores básicos + listas (OpenPhish / URLhaus).</p>
-
-    <div class="card">
-      <div class="row">
-        <input id="url" type="url" placeholder="https://exemplo.com/login"/>
-        <button id="btn" onclick="runCheck()">Analisar</button>
+    <!-- Coluna 1: entrada + resultados -->
+    <div class="section">
+      <div class="card">
+        <div class="row">
+          <input id="url" type="url" placeholder="https://exemplo.com/login"/>
+          <button id="btn" onclick="runCheck()">Analisar</button>
+        </div>
+        <div class="toolbar">
+          <button onclick="loadHistory()">Recarregar histórico</button>
+          <button onclick="exportHistory()">Exportar JSON</button>
+        </div>
+        <div class="muted" style="margin-top:8px">OpenPhish/URLhaus sem chave; SSL/DNS/WHOIS/Redirect/Similaridade/Conteúdo incluídos.</div>
       </div>
-      <div id="hint" class="muted" style="margin-top:8px">OpenPhish e URLhaus são consultados sem chave nesta versão.</div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:110px">Status</th>
+              <th style="width:30%">URL</th>
+              <th style="width:24%">Heurísticas</th>
+              <th style="width:36%">Listas & Técnico</th>
+            </tr>
+          </thead>
+          <tbody id="results"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>URL</th>
-            <th>Heurísticas</th>
-            <th>Listas</th>
-          </tr>
-        </thead>
-        <tbody id="results"></tbody>
-      </table>
+    <!-- Coluna 2: dashboard -->
+    <div class="section">
+      <div class="card">
+        <h3 class="dash-title">Dashboard</h3>
+        <div id="totals" class="totals"></div>
+        <canvas id="chart" width="400" height="160"></canvas>
+        <div class="legend">
+          <span class="i"><span class="sw" style="background:#16a34a"></span> safe</span>
+          <span class="i"><span class="sw" style="background:#f59e0b"></span> suspicious</span>
+          <span class="i"><span class="sw" style="background:#e11d48"></span> malicious</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3 class="dash-title">Explicações</h3>
+        <div class="box">
+          <div><b>punycode_idn</b>: pode mascarar domínios com caracteres parecidos (homograph).</div>
+          <div><b>excessive_subdomains</b>: subdomínios em excesso escondem o domínio real.</div>
+          <div><b>leet_in_domain</b>: trocas como <em>paypa1</em> ou <em>g00gle</em>.</div>
+          <div><b>dynamic_dns</b>: serviços como no-ip/dyndns aparecem em campanhas de phishing.</div>
+          <div><b>ssl_invalid</b>: emissor inválido, SAN ausente ou hostname não confere.</div>
+          <div><b>redirects_suspicious</b>: muitos redirecionamentos ou troca de domínio.</div>
+          <div><b>lookalike_brand</b>: domínio muito próximo de marcas conhecidas.</div>
+          <div><b>content_suspicious</b>: coleta credenciais/dados sensíveis (senha, cartão, CPF).</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -64,6 +118,7 @@ async function runCheck(){
     if(!res.ok){ alert('Falha na análise.'); return; }
     const data = await res.json();
     addRow(data);
+    await loadHistory();
   } catch (e) {
     alert('Erro: ' + e.message);
   } finally {
@@ -72,33 +127,165 @@ async function runCheck(){
 }
 
 function esc(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])) }
+function kv(label, value){ if(value===undefined||value===null||value==='') return ''; return `<div class="kv"><label>${esc(label)}:</label> <code>${esc(String(value))}</code></div>`; }
 
 function renderBL(b){
-  const base = `${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>`;
-  if(b.error){
-    const extra = b.raw ? ` <span class="muted">(raw: ${esc(String(b.raw))})</span>` : '';
-    return `<div class="pill err">${base} — erro: ${esc(String(b.error))}${extra}</div>`;
-  }
-  const note = b.note ? ' — ' + esc(b.note) : '';
-  return `<div class="pill">${base}${note}</div>`;
+  const listed = !!b.listed, err = b.error;
+  const base = `<span class="pill">${esc(b.source)}</span> ${listed?'<span class="status-ok">LISTADO</span>':'<span class="status-no">não</span>'}${b.note? ' <span class="muted">— '+esc(b.note)+'</span>':''}`;
+  if(!err) return `<div class="box"><div class="boxhead">${base}</div></div>`;
+  return `<div class="box"><div class="boxhead">${base}</div><details><summary class="status-bad">erro</summary><div>${kv('raw', b.raw)}</div></details></div>`;
+}
+
+function renderSSL(s){
+  if(!s) return '';
+  const ok = !!s.valid && !s.error;
+  const head = `<span class="pill">SSL</span> ${ok?'<span class="status-ok">válido</span>':'<span class="status-bad">inválido</span>'}`;
+  const body = `
+    ${kv('Erro', s.error)}
+    ${kv('Dias até expirar', s.days_left)}
+    ${kv('Expira em', s.not_after)}
+    ${kv('Issuer', s.issuer && (s.issuer.commonName || s.issuer.CN))}
+    ${s.sans && s.sans.length ? kv('SANs', s.sans.join(', ')) : ''}
+  `;
+  return `<div class="box"><div class="boxhead">${head}</div>${body?`<details><summary>detalhes</summary><div>${body}</div></details>`:''}</div>`;
+}
+
+function renderRedirects(r){
+  if(!r) return '';
+  const head = `<span class="pill">Redirects</span> ${r.suspicious?'<span class="status-bad">suspeito</span>':'<span class="status-no">ok</span>'}`;
+  const body = (r.chain||[]).map(u => kv('→', u)).join('');
+  return `<div class="box"><div class="boxhead">${head}</div>${body?`<details><summary>cadeia</summary><div>${body}</div></details>`:''}</div>`;
+}
+
+function renderSimilarity(s){
+  if(!s) return '';
+  const head = `<span class="pill">Similaridade</span> ${s.lookalike?'<span class="status-bad">lookalike</span>':'<span class="status-no">ok</span>'}`;
+  const body = `
+    ${kv('Domínio base', s.base)}
+    ${s.closest ? kv('Mais próximo', s.closest.brand + ' (dist='+s.closest.distance+')') : ''}
+  `;
+  return `<div class="box"><div class="boxhead">${head}</div>${body?`<details><summary>detalhes</summary><div>${body}</div></details>`:''}</div>`;
+}
+
+function renderContent(c){
+  if(!c) return '';
+  const risky = !!(c.login_form || c.password_field || (c.sensitive_keywords||[]).length);
+  const head = `<span class="pill">Conteúdo</span> ${risky?'<span class="status-bad">suspeito</span>':'<span class="status-no">ok</span>'}`;
+  const body = `
+    ${kv('Form login', c.login_form)}
+    ${kv('Campo senha', c.password_field)}
+    ${c.sensitive_keywords && c.sensitive_keywords.length ? kv('Palavras', c.sensitive_keywords.join(', ')) : ''}
+    ${kv('Erro', c.error)}
+  `;
+  return `<div class="box"><div class="boxhead">${head}</div>${body?`<details><summary>detalhes</summary><div>${body}</div></details>`:''}</div>`;
+}
+
+function renderAdvanced(a){
+  if(!a) return '';
+  const dyn = a.dynamic_dns && a.dynamic_dns.matched ? `<div class="box"><div class="boxhead"><span class="pill">DNS dinâmico</span> <span class="status-bad">detectado</span></div>${kv('Suffix', a.dynamic_dns.suffix)}</div>` : '';
+  const who = a.whois ? `<div class="box"><div class="boxhead"><span class="pill">WHOIS</span> ${a.whois.age_days!=null ? (a.whois.age_days<30?'<span class="status-bad">novo</span>':'<span class="status-ok">'+a.whois.age_days+' dias</span>'):'<span class="status-no">indisp.</span>'}</div>${(a.whois.creation_date||a.whois.registrar||a.whois.note||a.whois.error)?`<details><summary>detalhes</summary><div>${kv('Criado em', a.whois.creation_date)}${kv('Registrar', a.whois.registrar)}${kv('Nota', a.whois.note)}${kv('Erro', a.whois.error)}</div></details>`:''}</div>` : '';
+
+  return [
+    renderSSL(a.ssl),
+    renderRedirects(a.redirects),
+    dyn,
+    renderSimilarity(a.similarity),
+    renderContent(a.content),
+    who
+  ].join('');
 }
 
 function addRow(d){
   const verdict = d.verdict || {label:'safe', color:'#16a34a'};
   const heur = (d.heuristics||[]).map(h=>`<span class="pill">${esc(h.key)}</span>`).join(' ');
   const alerts = (d.alerts||[]).map(a =>
-    `<div class="muted" style="margin-top:6px"><strong>Possível phishing:</strong> ${esc(a.title)} — <em>${esc(a.why_not_certain)}</em></div>`
+    `<div class="alertline"><strong>Possível phishing:</strong> ${esc(a.title)} — <em>${esc(a.why_not_certain)}</em></div>`
   ).join('');
-  const bl = (d.blacklists||[]).map(renderBL).join(' ');
+
+  const blWrap = document.createElement('div');
+  blWrap.className = 'section';
+  (d.blacklists||[]).forEach(b => blWrap.innerHTML += renderBL(b));
+
+  const advWrap = document.createElement('div');
+  advWrap.className = 'section';
+  advWrap.innerHTML = renderAdvanced(d.advanced);
+
   const row = document.createElement('tr');
   row.innerHTML = `
-    <td><span class="dot" style="background:${verdict.color}"></span>${esc(verdict.label)}</td>
-    <td class="mono">${esc(d.normalized||d.input)}</td>
-    <td>${heur||'<span class="muted">—</span>'}${alerts? '<br/>'+alerts : ''}</td>
-    <td>${bl||'<span class="muted">—</span>'}</td>
+    <td><span class="dot" style="background:${verdict.color}"></span>${esc(verdict.label)}${d.verdict.score!=null?' ('+d.verdict.score+')':''}</td>
+    <td class="urlcell"><pre class="mono">${esc(d.normalized||d.input)}</pre></td>
+    <td>
+      <div class="stack">${heur || '<span class="muted">—</span>'}</div>
+      ${alerts ? `<div class="alerts">${alerts}</div>` : ''}
+    </td>
+    <td></td>
   `;
+  const cell = row.children[3];
+  const container = document.createElement('div');
+  container.appendChild(blWrap);
+  container.appendChild(advWrap);
+  cell.appendChild(container);
+
   document.getElementById('results').prepend(row);
 }
+
+/* -------- Dashboard -------- */
+
+async function loadHistory(){
+  const res = await fetch('/history');
+  if(!res.ok) return;
+  const data = await res.json();
+  renderDashboard(data.items||[]);
+}
+
+function renderDashboard(items){
+  const counts = {safe:0, suspicious:0, malicious:0};
+  for(const it of items){
+    const label = it?.verdict?.label || 'safe';
+    if(counts[label] !== undefined) counts[label] += 1;
+  }
+  const tot = (items||[]).length;
+
+  const totals = document.getElementById('totals');
+  totals.innerHTML = `
+    <span class="badge">Total: ${tot}</span>
+    <span class="badge" style="color:#16a34a">safe: ${counts.safe}</span>
+    <span class="badge" style="color:#f59e0b">suspicious: ${counts.suspicious}</span>
+    <span class="badge" style="color:#e11d48">malicious: ${counts.malicious}</span>
+  `;
+
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+  const vals = [counts.safe, counts.suspicious, counts.malicious];
+  const colors = ['#16a34a', '#f59e0b', '#e11d48'];
+  const labels = ['safe', 'suspicious', 'malicious'];
+  const maxv = Math.max(1, ...vals);
+  const barw = canvas.width / (vals.length*2);
+  vals.forEach((v,i)=>{
+    const h = (v/maxv) * (canvas.height - 20);
+    const x = 20 + i*barw*2;
+    const y = canvas.height - h - 10;
+    ctx.fillStyle = colors[i];
+    ctx.fillRect(x, y, barw, h);
+    ctx.fillStyle = '#dbe7ff';
+    ctx.fillText(labels[i]+': '+v, x, y-4);
+  });
+}
+
+async function exportHistory(){
+  const res = await fetch('/export');
+  if(!res.ok){ alert('Falha na exportação'); return; }
+  const data = await res.json();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'phishing-history.json';
+  a.click();
+}
+
+/* carrega dashboard inicial */
+loadHistory();
 </script>
 </body>
 </html>
