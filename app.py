@@ -1,7 +1,6 @@
-# app.py — Phishing Detector (MVP) — heurística avançada + histórico/export (fix: heuristics -> heur)
+# app.py — Phishing Detector (MVP) — heurística avançada + histórico/export
+# Regra ajustada: erro em blacklist não rebaixa sozinho para suspicious
 # Run: python -m uvicorn app:app --reload
-# Requires: fastapi, uvicorn, httpx, tldextract
-# Opcionais: python-whois (ou whois), dnspython
 
 import os
 import re
@@ -36,26 +35,23 @@ IP_PATTERN = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 OPENPHISH_FEED = "https://openphish.com/feed.txt"
 URLHAUS_URL_LOOKUP = "https://urlhaus.abuse.ch/api/v1/url/"
 
-# Padrões comuns de DNS dinâmico
 DYNAMIC_DNS_SUFFIXES = {
     "no-ip.com", "hopto.org", "zapto.org", "servehttp.com", "dyndns.org",
     "dyndns.com", "duckdns.org", "myftp.biz", "ddns.net", "ath.cx",
     "freeddns.org"
 }
 
-# Pequena lista de marcas/domínios conhecidos (exemplo pedagógico)
 KNOWN_BRANDS = {
     "google.com", "paypal.com", "microsoft.com", "facebook.com",
     "apple.com", "amazon.com", "bankofamerica.com", "itau.com.br",
     "nubank.com.br", "bradesco.com.br", "santander.com.br"
 }
 
-# Histórico em memória (para dashboard/export)
 HISTORY_LIMIT = 200
-HISTORY = []  # lista de resultados completos
+HISTORY = []
 
 # -----------------------------
-# Utils básicos
+# Utils
 # -----------------------------
 
 def normalize_url(url: str) -> str:
@@ -168,10 +164,9 @@ async def blacklist_checks(url: str):
     return [res_openphish, res_urlhaus]
 
 # -----------------------------
-# Heurística AVANÇADA
+# Heurística avançada
 # -----------------------------
 
-# WHOIS - idade do domínio (opcional)
 def _whois_basic_sync(domain: str) -> dict:
     info = {"domain": domain}
     try:
@@ -199,14 +194,12 @@ def _whois_basic_sync(domain: str) -> dict:
 async def whois_age(domain: str) -> dict:
     return await asyncio.to_thread(_whois_basic_sync, domain)
 
-# DNS dinâmico
 def is_dynamic_dns(domain: str) -> Optional[str]:
     for suffix in DYNAMIC_DNS_SUFFIXES:
         if domain.endswith(suffix):
             return suffix
     return None
 
-# SSL (emissor, expiração, SAN, hostname)
 def _parse_notafter(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
@@ -249,13 +242,7 @@ def _ssl_fetch_sync(host: str, port: int = 443, timeout: float = 6.0) -> dict:
 async def ssl_info(host: str) -> dict:
     return await asyncio.to_thread(_ssl_fetch_sync, host)
 
-# Redirecionamentos suspeitos
 async def detect_redirects(url: str) -> dict:
-    """
-    Considera suspeito:
-      - Mais de 3 redirecionamentos
-      - Mudança de domínio (eTLD+1) no redirecionamento
-    """
     out = {"chain": [], "suspicious": False}
     try:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
@@ -279,7 +266,6 @@ async def detect_redirects(url: str) -> dict:
         out["error"] = repr(e)
     return out
 
-# Similaridade com marcas (Levenshtein)
 def levenshtein(a: str, b: str) -> int:
     if a == b:
         return 0
@@ -299,20 +285,38 @@ def levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 def brand_similarity(domain: str):
-    # usar atributos do ExtractResult
     ext = tldextract.extract(domain)
-    base = ".".join(p for p in [ext.domain, ext.suffix] if p)
+    sld = (ext.domain or "").lower()
+    tld = (ext.suffix or "").lower()
+    base = ".".join(p for p in [sld, tld] if p)
 
-    sims = []
+    if not sld or not tld:
+        return {"base": base or domain, "closest": None, "lookalike": False}
+
+    if sld in {"example", "localhost", "test"}:
+        return {"base": base, "closest": None, "lookalike": False}
+
+    best = None
+    best_dist = 1_000
+
     for brand in KNOWN_BRANDS:
-        dist = levenshtein(base, brand)
-        sims.append({"brand": brand, "distance": dist})
-    sims.sort(key=lambda x: x["distance"])
-    top = sims[0] if sims else None
-    flag = bool(top and top["distance"] <= 3 and base != top["brand"])
-    return {"base": base, "closest": top, "lookalike": flag}
+        bext = tldextract.extract(brand)
+        bsld = (bext.domain or "").lower()
+        btld = (bext.suffix or "").lower()
+        if not bsld or not btld:
+            continue
+        if btld != tld:
+            continue
+        if abs(len(sld) - len(bsld)) > 2:
+            continue
+        dist = levenshtein(sld, bsld)
+        if dist < best_dist:
+            best_dist = dist
+            best = {"brand": brand, "distance": dist}
 
-# Conteúdo básico (login/sensível)
+    flag = bool(best and best["distance"] <= 1 and sld != tldextract.extract(best["brand"]).domain.lower())
+    return {"base": base, "closest": best, "lookalike": flag}
+
 async def content_probe(url: str) -> dict:
     out = {"login_form": False, "password_field": False, "sensitive_keywords": []}
     try:
@@ -325,28 +329,28 @@ async def content_probe(url: str) -> dict:
         if re.search(r"type\s*=\s*\"password\"", html):
             out["password_field"] = True
         keywords = ["cpf", "cartão", "cartao", "credit card", "ssn", "otp", "one-time password", "cvv"]
-        found = [k for k in keywords if k in html]
-        out["sensitive_keywords"] = found
+        out["sensitive_keywords"] = [k for k in keywords if k in html]
     except Exception as e:
         out["error"] = repr(e)
     return out
 
 # -----------------------------
-# Veredito + alerts
+# Veredito + alerts (ajuste principal aqui)
 # -----------------------------
 
 def verdict(heuristics: list, blacklists: list, advanced: dict) -> dict:
+    # 1) Listado em qualquer feed => malicious
     if any(b.get("listed") for b in blacklists):
         return {"label": "malicious", "score": None, "color": "#e11d48"}
 
-    def is_invalid_or_error(b: dict) -> bool:
-        note = (b.get("note") or "").lower()
-        err = b.get("error")
-        return bool(err) or ("invalid" in note)
+    # 2) 'invalid' explícito em qualquer feed => suspicious
+    def is_invalid(b: dict) -> bool:
+        return "invalid" in (b.get("note") or "").lower()
 
-    if any(is_invalid_or_error(b) for b in blacklists):
+    if any(is_invalid(b) for b in blacklists):
         return {"label": "suspicious", "score": None, "color": "#f59e0b"}
 
+    # 3) Score por heurística/avançado (erros de rede não contam sozinhos)
     weight = {
         "ip_in_url": 3,
         "punycode_idn": 2,
@@ -484,17 +488,14 @@ async def analyze(payload: dict):
     result = {
         "input": url,
         "normalized": norm,
-        "heuristics": [{"key": k, "detail": d} for k, d in heur],  # FIX AQUI
+        "heuristics": [{"key": k, "detail": d} for k, d in heur],
         "blacklists": bl,
         "advanced": advanced,
         "verdict": v,
         "alerts": alerts,
     }
 
-    HISTORY.append({
-        "ts": datetime.now(timezone.utc).isoformat(),
-        **result
-    })
+    HISTORY.append({"ts": datetime.now(timezone.utc).isoformat(), **result})
     if len(HISTORY) > HISTORY_LIMIT:
         del HISTORY[: len(HISTORY) - HISTORY_LIMIT]
 
