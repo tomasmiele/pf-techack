@@ -1,9 +1,10 @@
-# app.py — Phishing Detector (MVP)
+# app.py — Phishing Detector (MVP) — backend separado com debug e regra: erro/invalid em blacklist => suspicious
 # Run: python -m uvicorn app:app --reload
 # Requires: pip install -r requirements.txt
 
 import os
 import re
+import json
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
@@ -15,9 +16,8 @@ import tldextract
 
 app = FastAPI(title="Phishing Detector — MVP")
 
-# Mount da pasta estática (frontend)
+# Frontend (pasta estática)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
 
 # -----------------------------
 # Utilitários e heurísticas
@@ -88,9 +88,9 @@ URLHAUS_URL_LOOKUP = "https://urlhaus.abuse.ch/api/v1/url/"
 
 
 async def check_openphish(url: str) -> dict:
-    """Checa o feed público do OpenPhish (básico, best-effort)."""
+    """Checa o feed público do OpenPhish (best-effort)."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(OPENPHISH_FEED)
             r.raise_for_status()
             feed = r.text.splitlines()
@@ -105,26 +105,51 @@ async def check_openphish(url: str) -> dict:
         )
         return {"source": "OpenPhish", "listed": bool(hit)}
     except Exception as e:
-        return {"source": "OpenPhish", "listed": False, "error": str(e)}
+        return {"source": "OpenPhish", "listed": False, "error": repr(e)}
 
 
 async def check_urlhaus(url: str) -> dict:
-    """Consulta URLhaus (abuse.ch) via API pública (POST)."""
+    """Consulta URLhaus (abuse.ch) via API pública (POST). Retorna erros detalhados."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # URLhaus exige http(s) no valor de 'url'
+        if not re.match(r"^https?://", url, flags=re.I):
+            return {"source": "URLhaus", "listed": False, "note": "invalid url format (missing scheme)"}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.post(URLHAUS_URL_LOOKUP, data={"url": url})
+            text = r.text  # para debug em caso de JSON inválido
             r.raise_for_status()
-            payload = r.json()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as je:
+            return {"source": "URLhaus", "listed": False, "error": f"JSONDecodeError: {je}", "raw": text[:300]}
+
         status = payload.get("query_status")
+
+        # Casos não-erro, mas também não listados:
+        if status in {"no_results", "no results"}:
+            return {"source": "URLhaus", "listed": False, "note": "no results"}
+
+        if status == "invalid url format":
+            return {"source": "URLhaus", "listed": False, "note": "invalid url format"}
+
+        # Caso OK (achou algo)
         if status == "ok":
             url_status = payload.get("url_status")
             threat = payload.get("threat")
-            listed = url_status in {"online", "offline"}
+            listed = url_status in {"online", "offline"}  # conhecido pelo URLhaus
             note = f"status={url_status}" + (f"; threat={threat}" if threat else "")
             return {"source": "URLhaus", "listed": bool(listed), "note": note}
-        return {"source": "URLhaus", "listed": False, "note": status or "no match"}
+
+        # Qualquer outro status inesperado: retornar como 'error' para debug
+        return {"source": "URLhaus", "listed": False, "error": f"Unexpected query_status: {status}", "raw": str(payload)[:300]}
+
+    except httpx.ConnectError as ce:
+        return {"source": "URLhaus", "listed": False, "error": f"ConnectError: {repr(ce)}"}
+    except httpx.ReadTimeout as te:
+        return {"source": "URLhaus", "listed": False, "error": f"ReadTimeout: {repr(te)}"}
     except Exception as e:
-        return {"source": "URLhaus", "listed": False, "error": str(e)}
+        return {"source": "URLhaus", "listed": False, "error": repr(e)}
 
 
 async def blacklist_checks(url: str):
@@ -135,27 +160,38 @@ async def blacklist_checks(url: str):
 
 
 # -----------------------------
-# Veredito e alerts
+# Veredito + alerts (leet = alto)
 # -----------------------------
 
 def verdict(heuristics: list, blacklists: list) -> dict:
-    """Compute verdict using weighted heuristics.
-    leet_in_domain => peso alto (3).
-    Heurísticas de peso 2 geram 'alerts' (possibilidade, não conclusivo).
     """
-    # Se qualquer blacklist listou => malicious
+    Regras:
+      1) Se qualquer blacklist listou => malicious
+      2) Se qualquer blacklist teve ERRO ou 'invalid ...' => suspicious
+      3) Caso contrário, soma ponderada de heurísticas (>=3 => suspicious; senão safe)
+    """
+    # 1) Blacklist => malicious
     if any(b.get("listed") for b in blacklists):
         return {"label": "malicious", "score": None, "color": "#e11d48"}
 
+    # 2) Erros/Invalid em qualquer feed => suspicious
+    def is_invalid_or_error(b: dict) -> bool:
+        note = (b.get("note") or "").lower()
+        err = b.get("error")
+        return bool(err) or ("invalid" in note)
+
+    if any(is_invalid_or_error(b) for b in blacklists):
+        return {"label": "suspicious", "score": None, "color": "#f59e0b"}
+
+    # 3) Heurísticas (pesos)
     weight = {
         "ip_in_url": 3,
-        "punycode_idn": 2,          # médio: gera alert
-        "excessive_subdomains": 2,  # médio: gera alert
-        "leet_in_domain": 3,        # ALTO agora
+        "punycode_idn": 2,          # médio -> alerta
+        "excessive_subdomains": 2,  # médio -> alerta
+        "leet_in_domain": 3,        # alto
         "suspicious_chars": 1,
         "long_url": 1,
     }
-
     score = sum(weight.get(k, 1) for k, _ in heuristics)
 
     if score >= 3:
@@ -165,7 +201,6 @@ def verdict(heuristics: list, blacklists: list) -> dict:
 
 
 def generate_alerts(heuristics: list) -> list:
-    """Gera alerts para heurísticas de peso 2 (possibilidade de phishing, não conclusivo)."""
     weight = {
         "ip_in_url": 3,
         "punycode_idn": 2,

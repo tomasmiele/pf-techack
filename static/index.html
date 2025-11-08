@@ -20,7 +20,7 @@
     .muted{color:var(--muted)}
     .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-size:12px;background:#0b1322;border:1px solid rgba(255,255,255,.08)}
     .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace}
-    pre { white-space: pre-wrap; word-break: break-word; }
+    .err{color:#fecaca}
   </style>
 </head>
 <body>
@@ -33,9 +33,7 @@
         <input id="url" type="url" placeholder="https://exemplo.com/login"/>
         <button id="btn" onclick="runCheck()">Analisar</button>
       </div>
-      <div id="hint" class="muted" style="margin-top:8px">
-        OpenPhish e URLhaus são consultados sem chave nesta versão.
-      </div>
+      <div id="hint" class="muted" style="margin-top:8px">OpenPhish e URLhaus são consultados sem chave nesta versão.</div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -75,15 +73,23 @@ async function runCheck(){
 
 function esc(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])) }
 
+function renderBL(b){
+  const base = `${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>`;
+  if(b.error){
+    const extra = b.raw ? ` <span class="muted">(raw: ${esc(String(b.raw))})</span>` : '';
+    return `<div class="pill err">${base} — erro: ${esc(String(b.error))}${extra}</div>`;
+  }
+  const note = b.note ? ' — ' + esc(b.note) : '';
+  return `<div class="pill">${base}${note}</div>`;
+}
+
 function addRow(d){
   const verdict = d.verdict || {label:'safe', color:'#16a34a'};
   const heur = (d.heuristics||[]).map(h=>`<span class="pill">${esc(h.key)}</span>`).join(' ');
   const alerts = (d.alerts||[]).map(a =>
     `<div class="muted" style="margin-top:6px"><strong>Possível phishing:</strong> ${esc(a.title)} — <em>${esc(a.why_not_certain)}</em></div>`
   ).join('');
-  const bl = (d.blacklists||[]).map(b=>
-    `<div class="pill">${esc(b.source)}: <strong>${b.listed? 'LISTADO' : 'não'}</strong>${b.note? ' — '+esc(b.note): ''}${b.error? ' — error' : ''}</div>`
-  ).join(' ');
+  const bl = (d.blacklists||[]).map(renderBL).join(' ');
   const row = document.createElement('tr');
   row.innerHTML = `
     <td><span class="dot" style="background:${verdict.color}"></span>${esc(verdict.label)}</td>
